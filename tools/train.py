@@ -35,13 +35,13 @@ def train_epoch(
             zip(
                 samples,
                 map(
-                    lambda sample: sample.cuda(non_blocking=True),
+                    lambda sample: sample.to(device),
                     samples.values(),
                 ),
             )
         )
 
-        with torch.cuda.amp.autocast(enabled=cfg['AMP_ENABLE']):
+        with torch.cuda.amp.autocast(enabled=cfg['AMP_ENABLE'] if torch.cuda.is_available() else False):
             outputs = model(samples)
             loss = criterion(outputs, samples)
 
@@ -80,12 +80,11 @@ def train(
     world_size = num_proc * num_shards
     rank = shard_id * num_proc + local_rank
     torch.distributed.init_process_group(
-        backend=backend,
+        backend="gloo",
         init_method=init_method,
         world_size=world_size,
         rank=rank,
     )
-    torch.cuda.set_device(local_rank)
     du.init_distributed_training(cfg)
     np.random.seed(cfg['RNG_SEED'])
     torch.manual_seed(cfg['RNG_SEED'])

@@ -1,7 +1,5 @@
 import torch
 from torch.utils.data import DataLoader
-
-
 import M2TR.models 
 import M2TR.datasets
 import M2TR.utils.distributed as du
@@ -22,23 +20,33 @@ def build_model(cfg, gpu_id=None):
     logger.info('MODEL_NAME: ' + name)
     model = MODEL_REGISTRY.get(name)(model_cfg)
 
-    assert torch.cuda.is_available(), "Cuda is not available."
+    # Determine the device to use (CUDA, MPS, or CPU)
+    if torch.cuda.is_available():
+        device = torch.device(f"cuda:{gpu_id}" if gpu_id is not None else "cuda")
+    elif torch.backends.mps.is_available():
+        print("MPS backend is available. Using MPS.")
+        device = torch.device("mps")
+    else:
+        print("CUDA and MPS are not available. Using CPU.")
+        device = torch.device("cpu")
+
+    # Log the chosen device
+    logger.info(f"Using device: {device}")
+
+    # Check GPU availability and adjust accordingly
     assert (
-        cfg['NUM_GPUS'] <= torch.cuda.device_count()
+        cfg['NUM_GPUS'] <= torch.cuda.device_count() if torch.cuda.is_available() else 1
     ), "Cannot use more GPU devices than available"
 
-    if gpu_id is None:
-        # Determine the GPU used by the current process
-        cur_device = torch.cuda.current_device()
-    else:
-        cur_device = gpu_id
-    # Transfer the model to the current GPU device
-    model = model.cuda(device=cur_device)
-    # Use multi-process data parallel model in the multi-gpu setting
-    if cfg['NUM_GPUS'] > 1:
-        # Make model replica operate on the current device
+    # Move the model to the appropriate device
+    model = model.to(device)
+
+    # Use multi-process data parallel model in the multi-GPU setting
+    if cfg['NUM_GPUS'] > 1 and torch.cuda.is_available():
         model = torch.nn.parallel.DistributedDataParallel(
-            module=model, device_ids=[cur_device], output_device=cur_device, find_unused_parameters=True
+            module=model, device_ids=[gpu_id] if gpu_id is not None else [torch.cuda.current_device()], 
+            output_device=gpu_id if gpu_id is not None else torch.cuda.current_device(),
+            find_unused_parameters=True
         )
 
     return model
